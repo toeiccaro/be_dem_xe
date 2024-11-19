@@ -1,0 +1,39 @@
+version: '3.8'
+
+services:
+  sqlserver_be:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: sqlserver_be
+    environment:
+      - ACCEPT_EULA=Y
+      - MSSQL_SA_PASSWORD=19921999aA*
+      - MSSQL_PID=Express
+    ports:
+      - "1433:1433"
+    volumes:
+      - ./sql_data:/var/opt/mssql
+    networks:
+      - app_network
+    restart: always  
+
+  app:
+    build: .
+    container_name: fastapi_app
+    ports:
+      - "8000:8000"
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+      SQLSERVER_HOST: sqlserver_be
+      SQLSERVER_USER: sa
+      SQLSERVER_PASSWORD: 19921999aA*
+      SQLSERVER_DB: Scale
+    networks:
+      - app_network
+    restart: always
+
+networks:
+  app_network:
+    driver: bridge

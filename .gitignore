@@ -1,0 +1,50 @@
+# Byte-compiled files
+*.pyc
+*.pyo
+*.pyd
+__pycache__/
+
+# Virtual environment directories
+venv/
+env/
+ENV/
+.venv/
+.ENV/
+
+# Distribution/Packaging
+build/
+dist/
+*.egg-info/
+
+# Python wheel files
+*.whl
+
+# VSCode settings
+.vscode/
+
+# PyCharm settings
+.idea/
+
+# MyPy
+.mypy_cache/
+
+# Python test and coverage files
+*.cover
+*.hypothesis/
+.tox/
+.nox/
+.coverage
+nosetests.xml
+coverage.xml
+*.coveragerc
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints
+
+# Local configuration files
+*.env
+*.db
+*.sqlite
+sql_data/
+data/
+be_server_env/
