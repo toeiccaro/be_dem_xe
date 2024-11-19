@@ -1,6 +1,6 @@
 import logging
 
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, Body
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from typing import List, Optional
@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse
 from urllib.parse import unquote
 
 from .db import SessionLocal, SessionLocalSQLServer   # Đảm bảo có file db.py định nghĩa SessionLocal
-from .models import User, Vehicle, PhieuNhap  # Đảm bảo có file models.py định nghĩa User và Vehicle
+from .models import User, Vehicle, PhieuNhap, UserNew  # Đảm bảo có file models.py định nghĩa User và Vehicle
 from enum import Enum
 
 from fastapi import Query
@@ -45,6 +45,53 @@ def startup_event():
 def read_root():
     return {"message": "Welcome to the vehicle counting API"}
 
+class PhieuNhapUpdate(BaseModel):
+    sophieu: Optional[str] = None
+    ngay: Optional[datetime] = None
+    bienso: Optional[str] = None
+    taixe: Optional[str] = None
+    loaihinh: Optional[str] = None
+    canlan1: Optional[float] = None
+    canlan2: Optional[float] = None
+    giovao: Optional[datetime] = None
+    giora: Optional[datetime] = None
+    loaihang: Optional[str] = None
+    hopdong: Optional[str] = None
+    ghichu: Optional[str] = None
+    dongia: Optional[float] = None
+    is_thu_cong: Optional[bool] = None
+    nguoicapnhat: Optional[str] = None  # Add nguoicapnhat for updates
+
+    class Config:
+        orm_mode = True  # Ensure ORM mapping is enabled
+        from_attributes = True  # This allows from_orm to work correctly
+
+class PhieuNhapResponse(BaseModel):
+    id: int
+    sophieu: str
+    ngay: datetime
+    bienso: str
+    taixe: str
+    loaihinh: str
+    canlan1: Optional[float]
+    canlan2: Optional[float]
+    giovao: Optional[datetime]
+    giora: Optional[datetime]
+    loaihang: str
+    hopdong: str
+    ghichu: Optional[str]
+    ngaytao: datetime
+    nguoitao: str  # Creator
+    ngaycapnhat: Optional[datetime]
+    nguoicapnhat: Optional[str]  # Last updater
+    logChinhSua: Optional[str]
+    idThe: Optional[str]
+    dongia: Optional[float]
+    is_thu_cong: bool
+
+    class Config:
+        orm_mode = True  # To work with ORM models like SQLAlchemy
+
         
 # Định nghĩa các mô hình người dùng
 class UserCreate(BaseModel):
@@ -67,6 +114,25 @@ class CarType(str, Enum):
     xe_cong_nong = "xe_cong_nong"
     xe_nang = "xe_nang"
 
+class PhieuNhapCreate(BaseModel):
+    sophieu: str
+    ngay: datetime
+    bienso: str
+    taixe: str
+    loaihinh: str
+    canlan1: Optional[float] = None
+    canlan2: Optional[float] = None
+    giovao: Optional[datetime] = None
+    giora: Optional[datetime] = None
+    loaihang: str
+    hopdong: str
+    ghichu: Optional[str] = None
+    dongia: Optional[float] = None
+    is_thu_cong: bool
+    nguoitao: str  # Add the user (creator) directly in the DTO
+
+    class Config:
+        orm_mode = True
 # Định nghĩa các mô hình phương tiện
 class VehicleCreate(BaseModel):
     trackIdCamTruoc: Optional[str] = None  # Cập nhật theo mô hình mới
@@ -93,6 +159,27 @@ class VehicleResponse(BaseModel):
     class Config:
         from_attributes = True  # Thêm dòng này để hỗ trợ from_orm
 
+class UserNewCreate(BaseModel):
+    username: str
+    password: str
+    ho: Optional[str] = None
+    ten: Optional[str] = None
+    quyen: Optional[str] = None
+    dienthoai: Optional[str] = None
+    diachi: Optional[str] = None
+    trangthai: Optional[bool] = None  # Đảm bảo đúng kiểu dữ liệu
+
+class UserNewResponse(BaseModel):
+    username: str
+    ho: Optional[str] = None
+    ten: Optional[str] = None
+    quyen: Optional[str] = None
+    dienthoai: Optional[str] = None
+    diachi: Optional[str] = None
+    trangthai: Optional[str] = None
+
+    class Config:
+        orm_mode = True
 # Dependency để lấy phiên làm việc với cơ sở dữ liệu
 def get_db():
     db = SessionLocal()
@@ -389,6 +476,58 @@ def create_vehicle(vehicle: VehicleCreate, db: Session = Depends(get_db)):
     
     return result
         
+@app.post("/register-new/")
+def register_user(user: UserNewCreate, db: Session = Depends(get_sql_db)):
+    # Kiểm tra xem username đã tồn tại hay chưa
+    db_user = db.query(UserNew).filter(UserNew.username == user.username).first()
+    if db_user:
+        raise HTTPException(status_code=400, detail="Username already exists")
+    
+    # Tạo người dùng mới và lưu vào cơ sở dữ liệu
+    new_user = UserNew(
+        username=user.username,
+        password=user.password,
+        ho=user.ho,
+        ten=user.ten,
+        quyen=user.quyen,
+        dienthoai=user.dienthoai,
+        diachi=user.diachi,
+        trangthai=user.trangthai
+    )
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+    
+    return {"message": "User registered successfully", "username": new_user.username}
+
+
+# API Cập nhật thông tin người dùng
+@app.put("/update-user-new/{user_id}", response_model=UserNewResponse)
+def update_user(user_id: int, user: UserNewCreate, db: Session = Depends(get_sql_db)):
+    db_user = db.query(UserNew).filter(UserNew.id == user_id).first()
+    if not db_user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Cập nhật các trường có trong request
+    for key, value in user.dict(exclude_unset=True).items():
+        setattr(db_user, key, value)
+
+    db.commit()
+    db.refresh(db_user)
+    return db_user
+
+# API Đăng nhập người dùng
+@app.post("/login-new/")
+def login_user(user: UserNewCreate, db: Session = Depends(get_sql_db)):
+    # Tìm người dùng theo username
+    db_user = db.query(UserNew).filter(UserNew.username == user.username).first()
+    
+    # Kiểm tra mật khẩu và xem người dùng có tồn tại hay không
+    if not db_user or db_user.password != user.password:
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+    
+    return {"message": "Login successful", "username": db_user.username}
+
 @app.get("/phieu_nhap")
 def get_phieu_nhap(
     page: int = Query(1, ge=1),  # Số trang, bắt đầu từ 1
@@ -422,7 +561,119 @@ def get_phieu_nhap(
         "page": page,
         "size": size,
         "items": items
-    }    
+    } 
+
+@app.post("/create-phieu-nhap", response_model=PhieuNhapResponse)
+def create_phieu_nhap(
+    payload: PhieuNhapCreate,  # The DTO for request body
+    sql_server_db: Session = Depends(get_sql_db),  # Dependency for DB session
+):
+    # Get the current time for `ngaytao` and `ngaycapnhat`
+    now = datetime.utcnow()
+
+    # Create a new PhieuNhap instance
+    phieu_nhap = PhieuNhap(
+        sophieu=payload.sophieu,
+        ngay=payload.ngay,
+        bienso=payload.bienso,
+        taixe=payload.taixe,
+        loaihinh=payload.loaihinh,
+        canlan1=payload.canlan1,
+        canlan2=payload.canlan2,
+        giovao=payload.giovao,
+        giora=payload.giora,
+        loaihang=payload.loaihang,
+        hopdong=payload.hopdong,
+        ghichu=payload.ghichu,
+        dongia=payload.dongia,
+        is_thu_cong=payload.is_thu_cong,
+        ngaytao=now,
+        nguoitao=payload.nguoitao,  # Set creator from DTO
+        ngaycapnhat=now,
+        nguoicapnhat=payload.nguoitao,  # Set last updater from DTO (same as creator initially)
+    )
+
+    # Add the new record to the database
+    sql_server_db.add(phieu_nhap)
+    sql_server_db.commit()
+
+    # Return the created PhieuNhap as a response
+    return phieu_nhap
+
+@app.put("/edit-phieu-nhap/{phieu_nhap_id}", response_model=PhieuNhapResponse)
+def edit_phieu_nhap(
+    phieu_nhap_id: int,
+    payload: PhieuNhapUpdate,  # Use the updated DTO
+    sql_server_db: Session = Depends(get_sql_db),
+):
+    try:
+        # Find the existing PhieuNhap record
+        phieu_nhap = sql_server_db.query(PhieuNhap).filter(PhieuNhap.id == phieu_nhap_id).first()
+        if not phieu_nhap:
+            raise HTTPException(status_code=404, detail="Phiếu nhập không tồn tại.")
+
+        print("call1", payload)
+        # Update fields if present in payload
+        phieu_nhap.sophieu = payload.sophieu or phieu_nhap.sophieu
+        phieu_nhap.ngay = payload.ngay or phieu_nhap.ngay
+        phieu_nhap.bienso = payload.bienso or phieu_nhap.bienso
+        phieu_nhap.taixe = payload.taixe or phieu_nhap.taixe
+        phieu_nhap.loaihinh = payload.loaihinh or phieu_nhap.loaihinh
+        phieu_nhap.canlan1 = payload.canlan1 or phieu_nhap.canlan1
+        phieu_nhap.canlan2 = payload.canlan2 or phieu_nhap.canlan2
+        phieu_nhap.giovao = payload.giovao or phieu_nhap.giovao
+        phieu_nhap.giora = payload.giora or phieu_nhap.giora
+        phieu_nhap.loaihang = payload.loaihang or phieu_nhap.loaihang
+        phieu_nhap.hopdong = payload.hopdong or phieu_nhap.hopdong
+        phieu_nhap.ghichu = payload.ghichu or phieu_nhap.ghichu
+        phieu_nhap.dongia = payload.dongia or phieu_nhap.dongia
+        phieu_nhap.is_thu_cong = payload.is_thu_cong if payload.is_thu_cong is not None else phieu_nhap.is_thu_cong
+
+        print("call2", phieu_nhap)
+
+        # Set the updated_by field for the last updater
+        if payload.nguoicapnhat:
+            phieu_nhap.nguoicapnhat = payload.nguoicapnhat  # Update 'nguoicapnhat'
+        phieu_nhap.ngaycapnhat = datetime.utcnow()  # Update 'ngaycapnhat'
+
+        print("call3", phieu_nhap)
+
+        # Commit the changes to the database
+        sql_server_db.commit()
+        sql_server_db.refresh(phieu_nhap)
+
+        # Return the updated PhieuNhap as a response
+        return phieu_nhap
+
+    except Exception as e:
+        sql_server_db.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.delete("/xoa-phieu-nhap/{phieu_nhap_id}")
+def delete_phieu_nhap(
+    phieu_nhap_id: int,
+    nguoi_xoa: str,  # Getting user from the request body
+    sql_server_db: Session = Depends(get_sql_db),
+):
+    try:
+        # Find the PhieuNhap record to delete
+        phieu_nhap = sql_server_db.query(PhieuNhap).filter(PhieuNhap.id == phieu_nhap_id).first()
+        if not phieu_nhap:
+            raise HTTPException(status_code=404, detail="Phiếu nhập không tồn tại.")
+
+        # Log the deletion action
+        print(f"User '{nguoi_xoa}' đã xóa phiếu nhập ID: {phieu_nhap_id}")
+
+        # Delete the PhieuNhap record
+        sql_server_db.delete(phieu_nhap)
+        sql_server_db.commit()
+
+        return {"detail": "Đã xóa phiếu nhập thành công."}
+
+    except Exception as e:
+        sql_server_db.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+
 
 if __name__ == "__main__":
     import uvicorn

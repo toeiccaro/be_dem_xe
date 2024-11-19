@@ -1,5 +1,5 @@
 # app/models.py
-from sqlalchemy import Column, Integer, String, DateTime, Float
+from sqlalchemy import Column, Integer, String, DateTime, Float, Boolean
 from .db import Base
 from datetime import datetime
 from sqlalchemy.ext.declarative import declarative_base
@@ -62,12 +62,13 @@ class PhieuNhap(Base):
     logChinhSua = Column(String, nullable=True)
     idThe = Column(String, nullable=True)
     dongia = Column(Float, nullable=True)
+    is_thu_cong = Column(Boolean, nullable=False, name="isThuCong")  # Thêm cột này
+
 
 class UserNew(Base):
     __tablename__ = "tblUser"
 
-    id = Column(Integer, primary_key=True, index=True)
-    username = Column(String, nullable=False)  # username không được NULL
+    username = Column(String, primary_key=True, nullable=False)  # username không được NULL
     password = Column(String, nullable=False)  # password không được NULL
     ho = Column(String, nullable=True)  # Cho phép NULL
     ten = Column(String, nullable=True)  # Cho phép NULL
@@ -77,7 +78,7 @@ class UserNew(Base):
     trangthai = Column(String, nullable=True)  # Cho phép NULL
 
     def __str__(self):
-        return (f"User ID: {self.id}, "
+        return (
                 f"Username: {self.username}, "
                 f"Password: {self.password}, "
                 f"Ho: {self.ho}, "
