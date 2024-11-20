@@ -54,3 +54,5 @@ app/images/cam_truoc/ra/*
 app/images/cam_truoc/vao/*
 
 pgdata/
+
+backup_db_log

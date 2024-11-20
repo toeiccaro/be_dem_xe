@@ -116,8 +116,6 @@ class CarType(str, Enum):
     xe_nang = "xe_nang"
 
 class PhieuNhapCreate(BaseModel):
-    sophieu: str
-    ngay: datetime
     bienso: str
     taixe: str
     loaihinh: str
@@ -126,10 +124,10 @@ class PhieuNhapCreate(BaseModel):
     giovao: Optional[datetime] = None
     giora: Optional[datetime] = None
     loaihang: str
-    hopdong: str
+    hopdong: Optional[datetime] = ""
     ghichu: Optional[str] = None
     dongia: Optional[float] = None
-    is_thu_cong: bool
+    is_thu_cong: Optional[bool] = True
     nguoitao: str  # Add the user (creator) directly in the DTO
 
     class Config:
@@ -255,7 +253,7 @@ def get_vehicles(
     print("start_date1", start_date)
     print("end_date1", end_date)
     
-    query = db.query(Vehicle)
+    query = db.query(Vehicle).order_by(Vehicle.createdAt.desc())
 
     # Giữ nguyên start_date và end_date nếu chúng được truyền vào
     if start_date and end_date:
@@ -572,6 +570,10 @@ def get_phieu_nhap(
     # Áp dụng phân trang
     items = query.order_by(PhieuNhap.ngaytao.desc()).offset((page - 1) * size).limit(size).all()
 
+    total_nhap = query.filter(func.trim(PhieuNhap.loaihinh).like("NHAP")).with_entities(func.sum(PhieuNhap.canlan1 - PhieuNhap.canlan2)).scalar() or 0
+    total_xuat = query.filter(func.trim(PhieuNhap.loaihinh).like("XUAT")).with_entities(func.sum(PhieuNhap.canlan2 - PhieuNhap.canlan1)).scalar() or 0
+    total_thue = query.filter(func.trim(PhieuNhap.loaihinh).like("CANTHUE")).with_entities(func.sum(PhieuNhap.canlan1)).scalar() or 0
+
     # Chuẩn bị response
     results = []
     for item in items:
@@ -589,7 +591,7 @@ def get_phieu_nhap(
             dongia = float(item.dongia or 0)
         except ValueError:
             dongia = 0
-        thanh_tien = dongia * kl_hang
+        thanh_tien = dongia * kl_hang/1000
 
         # Thêm vào kết quả
         results.append({
@@ -619,6 +621,9 @@ def get_phieu_nhap(
         })
 
     return {
+        "all_nhap": total_nhap,  # Tổng kl_hang cho NHAP
+        "all_xuat": total_xuat,  # Tổng kl_hang cho XUAT
+        "all_thue": total_thue,   # Tổng kl_hang cho CANTHUE
         "total": total,
         "page": page,
         "size": size,
@@ -633,7 +638,7 @@ def create_phieu_nhap(
     from sqlalchemy.sql import func
 
     # Get the current time for `ngaytao` and `ngaycapnhat`
-    now = datetime.utcnow()
+    now = datetime.utcnow() + timedelta(hours=7)
 
     # Get the latest record in the table
     latest_phieu = (
@@ -661,30 +666,33 @@ def create_phieu_nhap(
     # Create a new PhieuNhap instance
     phieu_nhap = PhieuNhap(
         sophieu=new_sophieu,
-        ngay=payload.ngay,
+        ngay=now,
         bienso=payload.bienso,
         taixe=payload.taixe,
         loaihinh=payload.loaihinh,
         canlan1=payload.canlan1,
-        canlan2=payload.canlan2,
+        canlan2=payload.canlan2, 
         giovao=payload.giovao,
-        giora=payload.giora,
+        giora=payload.giora, 
         loaihang=payload.loaihang,
         hopdong=payload.hopdong,
         ghichu=payload.ghichu,
-        dongia=payload.dongia,
+        dongia=payload.dongia * 1000,
         is_thu_cong=True,
         ngaytao=now,
         nguoitao=payload.nguoitao,  # Set creator from DTO
         ngaycapnhat=now,
         nguoicapnhat=payload.nguoitao,  # Set last updater from DTO (same as creator initially)
     )
-
     # Add the new record to the database
-    sql_server_db.add(phieu_nhap)
-    sql_server_db.commit()
-    sql_server_db.refresh(phieu_nhap)
-
+    try:
+        # Add the new record to the database
+        sql_server_db.add(phieu_nhap)
+        sql_server_db.commit()
+        sql_server_db.refresh(phieu_nhap)
+    except Exception as e:  # Catch all exceptions
+        sql_server_db.rollback()  # Rollback in case of error
+        raise HTTPException(status_code=500, detail="Database error occurred")
     # Return the created PhieuNhap as a response
     return phieu_nhap
 
