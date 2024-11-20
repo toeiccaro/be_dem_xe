@@ -48,3 +48,9 @@ coverage.xml
 sql_data/
 data/
 be_server_env/
+app/images/cam_sau/ra/*
+app/images/cam_sau/vao/*
+app/images/cam_truoc/ra/*
+app/images/cam_truoc/vao/*
+
+pgdata/

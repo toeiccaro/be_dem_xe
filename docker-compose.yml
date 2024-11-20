@@ -2,7 +2,8 @@ version: '3.8'
 
 services:
   sqlserver_be:
-    image: mcr.microsoft.com/mssql/server:2022-latest
+    build: 
+      context: ./sqlserver
     container_name: sqlserver_be
     environment:
       - ACCEPT_EULA=Y
@@ -12,6 +13,7 @@ services:
       - "1433:1433"
     volumes:
       - ./sql_data:/var/opt/mssql
+      - /home/hello/project/back_up_server:/back_up_server  # Mount thư mục backup
     networks:
       - app_network
     restart: always  
@@ -30,6 +32,37 @@ services:
       SQLSERVER_USER: sa
       SQLSERVER_PASSWORD: 19921999aA*
       SQLSERVER_DB: Scale
+    volumes:
+      - /home/hello/project/back_up_server:/back_up_server  # Mount thư mục backup
+      - /home/hello/project/be_server/app/images:/app/images
+    networks:
+      - app_network
+    restart: always
+
+  postgres:
+    image: postgres:14
+    container_name: postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./pgdata:/var/lib/postgresql/data  # Mount thư mục data PostgreSQL
+      - /home/hello/project/back_up_server:/back_up_server  # Mount thư mục backup
+    networks:
+      - app_network
+    restart: always
+
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: postgres@gmail.com
+      PGADMIN_DEFAULT_PASSWORD: postgres
+    ports:
+      - "3005:80"
     networks:
       - app_network
     restart: always

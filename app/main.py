@@ -9,9 +9,10 @@ from fastapi.middleware.cors import CORSMiddleware
 import os
 from fastapi.responses import FileResponse
 from urllib.parse import unquote
+from sqlalchemy.sql import func
 
 from .db import SessionLocal, SessionLocalSQLServer   # Đảm bảo có file db.py định nghĩa SessionLocal
-from .models import User, Vehicle, PhieuNhap, UserNew  # Đảm bảo có file models.py định nghĩa User và Vehicle
+from .models import User, Vehicle, PhieuNhap, UserNew, tblLoaiHinh, tblDmHang, tblDmKH  # Đảm bảo có file models.py định nghĩa User và Vehicle
 from enum import Enum
 
 from fastapi import Query
@@ -301,12 +302,20 @@ def get_vehicle(vehicle_id: int, db: Session = Depends(get_db)):
 
 @app.get("/getImage/")
 def get_image(image_path: str):
-    # Kiểm tra nếu tệp có tồn tại
-    if not os.path.isfile(image_path):
-        raise HTTPException(status_code=404, detail="Image not found")
+    # Chuyển đổi đường dẫn host thành đường dẫn container
+    container_path = image_path.replace(
+        "/home/hello/project/be_server/app/images", 
+        "/app/images"
+    )
+
+    print("container_pathcontainer_path", container_path)
     
+    # Kiểm tra nếu tệp tồn tại trong container
+    if not os.path.isfile(container_path):
+        raise HTTPException(status_code=404, detail="Image not found")
+
     # Trả về hình ảnh
-    return FileResponse(image_path)
+    return FileResponse(container_path)
 
 def get_sql_db():
     sql_server_db = SessionLocalSQLServer()
@@ -537,43 +546,111 @@ def get_phieu_nhap(
     loaihinh: Optional[str] = None,  # Bộ lọc theo loại hình
     sql_server_db: Session = Depends(get_sql_db)
 ):
-    print("call1")
     query = sql_server_db.query(PhieuNhap)
-    print("call2", query.statement)
 
     # Áp dụng bộ lọc
     if sophieu:
-        query = query.filter(PhieuNhap.sophieu.like(f"%{sophieu}%"))
+        query = query.filter(func.trim(PhieuNhap.sophieu).like(f"%{sophieu.strip()}%"))
     if bienso:
-        query = query.filter(PhieuNhap.bienso.like(f"%{bienso}%"))
+        query = query.filter(func.trim(PhieuNhap.bienso).like(f"%{bienso.strip()}%"))
     if loaihinh:
-        query = query.filter(PhieuNhap.loaihinh.like(f"%{loaihinh}%"))
+        query = query.filter(func.trim(PhieuNhap.loaihinh).like(f"%{loaihinh.strip()}%"))
 
-    print("call3", query.statement)
-
-    query = query.order_by(PhieuNhap.ngaytao.desc())
-    # Tính toán phân trang
+    # Tính tổng số mục
     total = query.count()
-    items = query.offset((page - 1) * size).limit(size).all()
+
+    # Áp dụng phân trang
+    items = query.order_by(PhieuNhap.ngaytao.desc()).offset((page - 1) * size).limit(size).all()
+
+    # Chuẩn bị response
+    results = []
+    for item in items:
+        # Tính `kl_hang`
+        kl_hang = 0
+        if item.loaihinh.strip().upper() == "CANTHUE":
+            kl_hang = item.canlan1 or 0
+        elif item.loaihinh.strip().upper() == "NHAP":
+            kl_hang = (item.canlan1 or 0) - (item.canlan2 or 0)
+        elif item.loaihinh.strip().upper() == "XUAT":
+            kl_hang = (item.canlan2 or 0) - (item.canlan1 or 0)
+
+        # Tính `thanh_tien`
+        try:
+            dongia = float(item.dongia or 0)
+        except ValueError:
+            dongia = 0
+        thanh_tien = dongia * kl_hang
+
+        # Thêm vào kết quả
+        results.append({
+            "id": item.id,
+            "sophieu": item.sophieu,
+            "ngay": item.ngay,
+            "bienso": item.bienso,
+            "taixe": item.taixe,
+            "loaihinh": item.loaihinh,
+            "canlan1": item.canlan1,
+            "canlan2": item.canlan2,
+            "giovao": item.giovao,
+            "giora": item.giora,
+            "loaihang": item.loaihang,
+            "hopdong": item.hopdong,
+            "ghichu": item.ghichu,
+            "ngaytao": item.ngaytao,
+            "nguoitao": item.nguoitao,
+            "ngaycapnhat": item.ngaycapnhat,
+            "nguoicapnhat": item.nguoicapnhat,
+            "logChinhSua": item.logChinhSua,
+            "idThe": item.idThe,
+            "dongia": item.dongia,
+            "is_thu_cong": item.is_thu_cong,
+            "kl_hang": kl_hang,  # Thêm `kl_hang`
+            "thanh_tien": thanh_tien  # Thêm `thanh_tien`
+        })
 
     return {
         "total": total,
         "page": page,
         "size": size,
-        "items": items
-    } 
+        "items": results
+    }
 
 @app.post("/create-phieu-nhap", response_model=PhieuNhapResponse)
 def create_phieu_nhap(
     payload: PhieuNhapCreate,  # The DTO for request body
     sql_server_db: Session = Depends(get_sql_db),  # Dependency for DB session
 ):
+    from sqlalchemy.sql import func
+
     # Get the current time for `ngaytao` and `ngaycapnhat`
     now = datetime.utcnow()
 
+    # Get the latest record in the table
+    latest_phieu = (
+        sql_server_db.query(PhieuNhap)
+        .order_by(PhieuNhap.id.desc())  # Replace `id` with the actual primary key if different
+        .first()
+    )
+
+    # Determine the new `sophieu`
+    if latest_phieu and latest_phieu.sophieu.startswith("TC_000"):
+        try:
+            # Extract the number part from the existing `sophieu`
+            latest_number = int(latest_phieu.sophieu.split("_")[1])
+            new_number = latest_number + 1
+        except (ValueError, IndexError):
+            # Handle cases where the split fails or the number isn't valid
+            new_number = latest_phieu.id + 1
+    else:
+        # If no valid latest `sophieu` exists, use "TC_000" + (latest ID + 1)
+        new_number = (latest_phieu.id + 1) if latest_phieu else 1
+
+    # Create the new `sophieu`
+    new_sophieu = f"TC_000{new_number}"
+
     # Create a new PhieuNhap instance
     phieu_nhap = PhieuNhap(
-        sophieu=payload.sophieu,
+        sophieu=new_sophieu,
         ngay=payload.ngay,
         bienso=payload.bienso,
         taixe=payload.taixe,
@@ -586,7 +663,7 @@ def create_phieu_nhap(
         hopdong=payload.hopdong,
         ghichu=payload.ghichu,
         dongia=payload.dongia,
-        is_thu_cong=payload.is_thu_cong,
+        is_thu_cong=True,
         ngaytao=now,
         nguoitao=payload.nguoitao,  # Set creator from DTO
         ngaycapnhat=now,
@@ -596,9 +673,11 @@ def create_phieu_nhap(
     # Add the new record to the database
     sql_server_db.add(phieu_nhap)
     sql_server_db.commit()
+    sql_server_db.refresh(phieu_nhap)
 
     # Return the created PhieuNhap as a response
     return phieu_nhap
+
 
 @app.put("/edit-phieu-nhap/{phieu_nhap_id}", response_model=PhieuNhapResponse)
 def edit_phieu_nhap(
@@ -673,6 +752,45 @@ def delete_phieu_nhap(
     except Exception as e:
         sql_server_db.rollback()
         raise HTTPException(status_code=400, detail=str(e))
+
+@app.get("/loai-hinh")
+def get_list_loai_hinh(sql_server_db: Session = Depends(get_sql_db)):
+    query = sql_server_db.query(tblLoaiHinh)
+    items = query.all()
+    return {"items": items}
+
+@app.get("/loai-hang")
+def get_list_dm_hang(sql_server_db: Session = Depends(get_sql_db)):
+    query = sql_server_db.query(tblDmHang)
+    items = query.all()
+    return {"items": items}
+
+@app.get("/khach-hang")
+def get_list_khach_hang(sql_server_db: Session = Depends(get_sql_db)):
+    query = sql_server_db.query(tblDmKH)
+    items = query.all()
+    return {"items": items}
+
+@app.get("/khach-hang/{id}")
+def get_khach_hang_by_id(id: int, sql_server_db: Session = Depends(get_sql_db)):
+    khach_hang = sql_server_db.query(tblDmKH).filter(tblDmKH.Id == id).first()
+    if not khach_hang:
+        raise HTTPException(status_code=404, detail="Không tìm thấy khách hàng")
+    return khach_hang
+
+@app.get("/loai-hang/{mahang}")
+def get_hang_by_mahang(mahang: str, sql_server_db: Session = Depends(get_sql_db)):
+    hang = sql_server_db.query(tblDmHang).filter(tblDmHang.mahang == mahang).first()
+    if not hang:
+        raise HTTPException(status_code=404, detail="Không tìm thấy hàng")
+    return hang
+
+@app.get("/loai-hinh/{ma}")
+def get_loai_hinh_by_ma(ma: str, sql_server_db: Session = Depends(get_sql_db)):
+    loai_hinh = sql_server_db.query(tblLoaiHinh).filter(tblLoaiHinh.ma == ma).first()
+    if not loai_hinh:
+        raise HTTPException(status_code=404, detail="Không tìm thấy loại hình")
+    return loai_hinh
 
 
 if __name__ == "__main__":

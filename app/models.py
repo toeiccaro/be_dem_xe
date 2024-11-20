@@ -87,3 +87,35 @@ class UserNew(Base):
                 f"Dienthoai: {self.dienthoai}, "
                 f"Diachi: {self.diachi}, "
                 f"Trangthai: {self.trangthai}")
+
+class tblLoaiHinh(Base):
+    __tablename__ = "tblLoaiHinh"
+
+    ma = Column(String, primary_key=True)
+    ten = Column(String)
+    nguoitao = Column(String)
+    ngaytao = Column(DateTime)
+
+class tblDmHang(Base):
+    __tablename__ = "tblDmHang"
+
+    mahang = Column(String, primary_key=True)
+    tenhang = Column(String)
+    ghichu = Column(String, nullable=True)
+    hoatdong = Column(Boolean, nullable=True)
+    ngaytao = Column(DateTime)
+    nguoitao = Column(String)
+    tinhtapchat = Column(Boolean, nullable=True)
+    nguoicapnhat = Column(String, nullable=True)
+    ngaycapnhat = Column(DateTime, nullable=True)
+
+class tblDmKH(Base):
+    __tablename__ = "tblDmKH"
+
+    Id = Column(Integer, primary_key=True)
+    hoten = Column(String)
+    diachi = Column(String, nullable=True)
+    nguoitao = Column(String)
+    ngaytao = Column(DateTime)
+    nguoicapnhat = Column(String, nullable=True)
+    ngaycapnhat = Column(DateTime, nullable=True)
