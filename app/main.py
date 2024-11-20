@@ -4,7 +4,7 @@ from fastapi import FastAPI, Depends, HTTPException, Body
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 from fastapi.middleware.cors import CORSMiddleware
 import os
 from fastapi.responses import FileResponse
@@ -544,6 +544,7 @@ def get_phieu_nhap(
     sophieu: Optional[str] = None,  # Bộ lọc theo số phiếu
     bienso: Optional[str] = None,  # Bộ lọc theo biển số
     loaihinh: Optional[str] = None,  # Bộ lọc theo loại hình
+    ngay: Optional[str] = None,  # Bộ lọc theo ngày (format: YYYY-MM-DD)
     sql_server_db: Session = Depends(get_sql_db)
 ):
     query = sql_server_db.query(PhieuNhap)
@@ -555,6 +556,15 @@ def get_phieu_nhap(
         query = query.filter(func.trim(PhieuNhap.bienso).like(f"%{bienso.strip()}%"))
     if loaihinh:
         query = query.filter(func.trim(PhieuNhap.loaihinh).like(f"%{loaihinh.strip()}%"))
+    if ngay:
+        try:
+            # Parse `ngay` để lấy khoảng thời gian từ 00:00:00 đến 23:59:59
+            start_date = datetime.strptime(ngay, "%Y-%m-%d")
+            end_date = start_date + timedelta(days=1) - timedelta(seconds=1)
+            query = query.filter(PhieuNhap.ngay.between(start_date, end_date))
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD.")
+
 
     # Tính tổng số mục
     total = query.count()
