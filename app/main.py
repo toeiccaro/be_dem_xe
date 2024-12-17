@@ -608,9 +608,17 @@ def get_phieu_nhap(
     items = query.order_by(PhieuNhap.ngaytao.desc()).offset((page - 1) * size).limit(size).all()
 
     total_nhap = query.filter(func.trim(PhieuNhap.loaihinh).like("NHAP")).with_entities(func.sum(PhieuNhap.canlan1 - PhieuNhap.canlan2)).scalar() or 0
-    total_xuat = query.filter(func.trim(PhieuNhap.loaihinh).like("XUAT")).with_entities(func.sum(PhieuNhap.canlan2 - PhieuNhap.canlan1)).scalar() or 0
+    total_xuat = (
+    query.filter(
+        func.trim(PhieuNhap.loaihinh).like("XUAT"),  # Chỉ lấy loại hình XUAT
+        PhieuNhap.canlan2 != 0  # Chỉ tính nếu canlan2 khác 0
+    )
+    .with_entities(func.sum(PhieuNhap.canlan2 - PhieuNhap.canlan1))
+    .scalar()
+    ) or 0
     total_thue = query.filter(func.trim(PhieuNhap.loaihinh).like("CANTHUE")).with_entities(func.sum(PhieuNhap.canlan1)).scalar() or 0
 
+    print("total_xuat", total_xuat)
     # Chuẩn bị response
     results = []
     for item in items:
