@@ -93,7 +93,10 @@ class PhieuNhapResponse(BaseModel):
     class Config:
         orm_mode = True  # To work with ORM models like SQLAlchemy
 
-        
+class PasswordUpdate(BaseModel):
+    oldpassword: str
+    newpassword: str
+       
 # Định nghĩa các mô hình người dùng
 class UserCreate(BaseModel):
     username: str
@@ -117,7 +120,7 @@ class CarType(str, Enum):
 
 class PhieuNhapCreate(BaseModel):
     bienso: str
-    taixe: str
+    taixe: Optional[str] = None
     loaihinh: str
     canlan1: Optional[float] = None
     canlan2: Optional[float] = None
@@ -204,20 +207,26 @@ def get_all_users(skip: int = 0, limit: int = 10, db: Session = Depends(get_db))
     users = db.query(User).offset(skip).limit(limit).all()
     return users
 
-
+# API forgot-password
 @app.put("/forgot-password/{username}", response_model=UserResponse)
-def update_user(username: str, user: UserUpdate, db: Session = Depends(get_db)):
-    # Kiểm tra xem username có tồn tại không
+def update_password(username: str, passwords: PasswordUpdate, db: Session = Depends(get_db)):
+    # Lấy thông tin người dùng từ cơ sở dữ liệu
     db_user = db.query(User).filter(User.username == username).first()
+    
     if db_user is None:
         raise HTTPException(status_code=404, detail="User not found")
 
-    # Cập nhật thông tin người dùng
-    for key, value in user.dict(exclude_unset=True).items():
-        setattr(db_user, key, value)
-
+    # Kiểm tra mật khẩu cũ
+    if db_user.password != passwords.oldpassword:
+        raise HTTPException(status_code=400, detail="Old password is incorrect")
+    
+    # Cập nhật mật khẩu mới
+    db_user.password = passwords.newpassword
+    
+    # Commit và refresh dữ liệu người dùng
     db.commit()
     db.refresh(db_user)
+    
     return db_user
 
 # API lấy thông tin người dùng theo ID
@@ -282,6 +291,12 @@ def get_vehicles(
 
     # Phân trang
     vehicles = query.offset(skip).limit(limit).all()
+    
+    for vehicle in vehicles:
+        if vehicle.image_path_cam_truoc == "string":
+            vehicle.image_path_cam_truoc = ""
+        if vehicle.image_path_cam_sau == "string":
+            vehicle.image_path_cam_sau = ""
 
     # Chuyển đổi danh sách Vehicle thành VehicleResponse
     vehicle_responses = [VehicleResponse.from_orm(vehicle) for vehicle in vehicles]
@@ -325,6 +340,7 @@ def get_sql_db():
 def check_and_save_vehicle_cam_truoc(vehicle, db: Session, current_time: datetime):
     # Lấy 10 phương tiện gần đây nhất
     vehicles = db.query(Vehicle).order_by(Vehicle.createdAt.desc()).limit(10).all()
+    print("call2vehicles", [str(vehicle) for vehicle in vehicles])
 
     # Kiểm tra nếu không có phương tiện nào
     if not vehicles:
@@ -341,9 +357,13 @@ def check_and_save_vehicle_cam_truoc(vehicle, db: Session, current_time: datetim
         db.commit()
         db.refresh(new_vehicle)
         return {"message": "Not vehicles so Created new vehicle", "trackIdCamTruoc": vehicle.trackIdCamTruoc}
-    
+
+    if any((current_time - vehicle.createdAt).total_seconds() < 120 for vehicle in vehicles):
+        print(f"CAM Truoc Not created because exist in 120 seconds va direction ={vehicle.direction}")
+        return {"message": f"CAM Truoc Not created because exist in 120 seconds va direction ={vehicle.direction}"}
+
     # Kiểm tra thời gian chênh lệch và các điều kiện khác
-    if all((current_time - vehicle.createdAt).total_seconds() > 300 for vehicle in vehicles):
+    if all((current_time - vehicle.createdAt).total_seconds() > 180 for vehicle in vehicles):
         new_vehicle = Vehicle(
             trackIdCamTruoc=vehicle.trackIdCamTruoc,
             direction=vehicle.direction,
@@ -394,10 +414,13 @@ def check_and_save_vehicle_cam_truoc(vehicle, db: Session, current_time: datetim
     db.refresh(new_vehicle)
     return {"message": "Created new vehicle", "trackIdCamTruoc": vehicle.trackIdCamTruoc}
 
+from sqlalchemy import text
+
 def check_and_save_vehicle_cam_sau(vehicle, db: Session, current_time: datetime):
     # Lấy 10 phương tiện gần đây nhất
+    db.execute(text("LOCK TABLE vehicles IN ACCESS EXCLUSIVE MODE"))
     vehicles = db.query(Vehicle).order_by(Vehicle.createdAt.desc()).limit(10).all()
-    print("call2")
+    print("call2vehicles", [str(vehicle) for vehicle in vehicles])
 
     # Kiểm tra nếu không có phương tiện nào
     if not vehicles:
@@ -415,8 +438,12 @@ def check_and_save_vehicle_cam_sau(vehicle, db: Session, current_time: datetime)
         db.refresh(new_vehicle)
         return {"message": "Not vehicles so Created new vehicle", "trackIdCamSau": vehicle.trackIdCamSau}
     
+    if any((current_time - vehicle.createdAt).total_seconds() < 120 for vehicle in vehicles):
+        print(f"CAM SAU Not created because exist in 120 seconds va direction ={vehicle.direction}")
+        return {"message": f"CAM SAU Not created because exist in 120 seconds va direction ={vehicle.direction}"}    
+    
     # Kiểm tra thời gian chênh lệch và các điều kiện khác
-    if all((current_time - vehicle.createdAt).total_seconds() > 300 for vehicle in vehicles):
+    if all((current_time - vehicle.createdAt).total_seconds() > 180 for vehicle in vehicles):
         print("call2.2.2.2")
         new_vehicle = Vehicle(
             trackIdCamSau=vehicle.trackIdCamSau,
@@ -470,15 +497,23 @@ def check_and_save_vehicle_cam_sau(vehicle, db: Session, current_time: datetime)
 
 @app.post("/create-vehicles/")
 def create_vehicle(vehicle: VehicleCreate, db: Session = Depends(get_db)):
+    current_time_vn = datetime.utcnow() + timedelta(hours=7)
+    print("current_time_vn_truoc=", current_time_vn)
+    # Kiểm tra nếu thời gian từ 0h đến 5h sáng
+    # if 0 <= current_time_vn.hour < 5:
+    #     return {"message": "Không được lưu phương tiện trong khoảng từ 0h đến 5h sáng (giờ Việt Nam)"}
+    
+    # print("current_time_vn_sau=", current_time_vn)
+    
     current_time = vehicle.createdAt or datetime.utcnow()
     print("vehicleDTO=", vehicle)
     # Gọi hàm kiểm tra và lưu phương tiện
-    if vehicle.trackIdCamTruoc:
+    if vehicle.trackIdCamTruoc is not None:
         result = check_and_save_vehicle_cam_truoc(vehicle, db, current_time)
     
     # Kiểm tra nếu trackIdCamSau tồn tại, gọi check_and_save_vehicle_cam_sau
-    if vehicle.trackIdCamSau:
-        print("call1")
+    if vehicle.trackIdCamSau is not None:
+        print("call123")
         result = check_and_save_vehicle_cam_sau(vehicle, db, current_time)
     
     return result
@@ -525,14 +560,16 @@ def update_user(user_id: int, user: UserNewCreate, db: Session = Depends(get_sql
 
 # API Đăng nhập người dùng
 @app.post("/login-new/")
-def login_user(user: UserNewCreate, db: Session = Depends(get_sql_db)):
-    # Tìm người dùng theo username
-    db_user = db.query(UserNew).filter(UserNew.username == user.username).first()
-    
-    # Kiểm tra mật khẩu và xem người dùng có tồn tại hay không
+def login_user(user: UserNewCreate, db: Session = Depends(get_db)):
+    db_user = db.query(User).filter(User.username == user.username).first()
+    print("db_user", db_user)
     if not db_user or db_user.password != user.password:
-        raise HTTPException(status_code=401, detail="Invalid username or password")
+       raise HTTPException(status_code=401, detail="Invalid username or password")
     
+    # if user.password == "123456aA*" and user.username == "admin":
+    #     return {"message": "Login successful", "username": user.username}
+    
+    # raise HTTPException(status_code=401, detail="Invalid username or password")
     return {"message": "Login successful", "username": db_user.username}
 
 @app.get("/phieu_nhap")
@@ -809,6 +846,52 @@ def get_loai_hinh_by_ma(ma: str, sql_server_db: Session = Depends(get_sql_db)):
     if not loai_hinh:
         raise HTTPException(status_code=404, detail="Không tìm thấy loại hình")
     return loai_hinh
+
+@app.get("/monitor-phieu-nhap")
+def monitor_phieu_nhap(sql_db: Session = Depends(get_sql_db), db: Session = Depends(get_db)):
+    # Lấy bản ghi từ bảng PhieuNhap
+    phieu_nhap = sql_db.query(PhieuNhap).order_by(PhieuNhap.id.desc()).first()
+    if not phieu_nhap:
+        return {"message": "PhieuNhap not found"}
+    
+    print("phieu_nhap", phieu_nhap)
+
+    # Thêm 7 giờ vào giớ phát hành và giờ vào
+    if phieu_nhap.giora:
+        phieu_nhap.giora = phieu_nhap.giora + timedelta(hours=7)
+        print("phieu_nhap.giora after adding 7 hours:", phieu_nhap.giora)
+
+    if phieu_nhap.giovao:
+        phieu_nhap.giovao = phieu_nhap.giovao + timedelta(hours=7)
+        print("phieu_nhap.giovao after adding 7 hours:", phieu_nhap.giovao)
+
+    # Lấy 3 bản ghi gần nhất từ Vehicle mà is_checked != True
+    recent_vehicles = db.query(Vehicle).order_by(Vehicle.createdAt.desc()).limit(3).all()
+
+    # Kiểm tra `giora` so với các bản ghi trong Vehicle (chỉ kiểm tra các Vehicle chưa được đánh dấu là True)
+    if phieu_nhap.giora:
+        print("phieu_nhap.giora=", phieu_nhap.giora)
+        for vehicle in recent_vehicles:
+            if abs((phieu_nhap.giora - vehicle.createdAt).total_seconds()) < 120 and vehicle.is_checked != True:
+                print("phieu_nhap.giora<120=", phieu_nhap.giora)
+                vehicle.direction = "ra"
+                vehicle.is_checked = True  # Đánh dấu là đã kiểm tra
+                db.commit()
+                return {"message": f"Updated Vehicle ID {vehicle.id} direction to 'ra', marked as checked"}
+
+    # Kiểm tra `giovao` so với các bản ghi trong Vehicle (chỉ kiểm tra các Vehicle chưa được đánh dấu là True)
+    if phieu_nhap.giovao:
+        print("phieu_nhap.giovao=", phieu_nhap.giovao)
+        for vehicle in recent_vehicles:
+            if abs((phieu_nhap.giovao - vehicle.createdAt).total_seconds()) < 120 and vehicle.is_checked != True:
+                print("phieu_nhap.giovao<120=", phieu_nhap.giovao)
+                vehicle.direction = "vao"
+                vehicle.is_checked = True  # Đánh dấu là đã kiểm tra
+                db.commit()
+                return {"message": f"Updated Vehicle ID {vehicle.id} direction to 'vao', marked as checked"}
+
+    # Nếu không có bản ghi nào thỏa mãn
+    return {"message": "No matching Vehicle records found"}
 
 
 if __name__ == "__main__":

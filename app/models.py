@@ -11,7 +11,10 @@ class User(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String, unique=True, index=True)
-    password = Column(String)  # Chú ý: Nên mã hóa mật khẩu trước khi lưu trữ!
+    password = Column(String)  
+
+    def __str__(self):
+        return f"User ID: {self.id}, Username: {self.username}, Password: {self.password}"  # Log chi tiết
 
 class Vehicle(Base):
     __tablename__ = "vehicles"
@@ -26,6 +29,7 @@ class Vehicle(Base):
     image_path_cam_truoc = Column(String, name="image_path_cam_truoc")
     image_path_cam_sau = Column(String, name="image_path_cam_sau")
     car_type = Column(String, name="car_type")  # Thêm cột car_type
+    is_checked = Column(Boolean, nullable=True, default=False)  # Cột is_checked, mặc định là False
 
     def __str__(self):
         return (f"Vehicle ID: {self.id}, "
@@ -37,7 +41,8 @@ class Vehicle(Base):
                 f"Direction: {self.direction}, "
                 f"Image Path Cam Truoc: {self.image_path_cam_truoc}, "
                 f"Image Path Cam Sau: {self.image_path_cam_sau}, "
-                f"Car Type: {self.car_type}")  # Thêm thông tin car_type vào __str__ để hiển thị
+                f"Car Type: {self.car_type}, "
+                f"Is Checked: {self.is_checked}")  # Thêm thông tin is_checked vào __str__
 
 class PhieuNhap(Base):
     __tablename__ = "tblPhieuNhap"
