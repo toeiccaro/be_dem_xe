@@ -68,6 +68,12 @@ class PhieuNhap(Base):
     idThe = Column(String, nullable=True)
     dongia = Column(Float, nullable=True)
     is_thu_cong = Column(Boolean, nullable=False, name="isThuCong")  # Thêm cột này
+    
+    def as_dict(self):
+        """
+        Chuyển đổi một đối tượng `PhieuNhap` thành dictionary.
+        """
+        return {key: value for key, value in self.__dict__.items() if key != "_sa_instance_state"}
 
 
 class UserNew(Base):

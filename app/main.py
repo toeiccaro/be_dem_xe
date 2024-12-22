@@ -500,7 +500,7 @@ def create_vehicle(vehicle: VehicleCreate, db: Session = Depends(get_db)):
     current_time_vn = datetime.utcnow() + timedelta(hours=7)
     print("current_time_vn_truoc=", current_time_vn)
     # Kiểm tra nếu thời gian từ 0h đến 5h sáng
-    # if 0 <= current_time_vn.hour < 5:
+    # if 0 <= current_time_vn.hour < 5 and (vehicle.trackIdCamSau == "None" or vehicle.trackIdCamSau is None):
     #     return {"message": "Không được lưu phương tiện trong khoảng từ 0h đến 5h sáng (giờ Việt Nam)"}
     
     # print("current_time_vn_sau=", current_time_vn)
@@ -606,8 +606,15 @@ def get_phieu_nhap(
 
     # Áp dụng phân trang
     items = query.order_by(PhieuNhap.ngaytao.desc()).offset((page - 1) * size).limit(size).all()
+    
+    nhap_items = [item for item in items if item.loaihinh.strip().upper() == "NHAP"]
+    nhap_items_data = [item.as_dict() for item in nhap_items]
+    print("nhap_items:", nhap_items_data)
 
-    total_nhap = query.filter(func.trim(PhieuNhap.loaihinh).like("NHAP")).with_entities(func.sum(PhieuNhap.canlan1 - PhieuNhap.canlan2)).scalar() or 0
+    
+    total_nhap = query.filter(func.trim(PhieuNhap.loaihinh).like("NHAP"),PhieuNhap.giora.isnot(None)).with_entities(func.sum(PhieuNhap.canlan1 - PhieuNhap.canlan2)).scalar() or 0
+    print("total_nhap", total_nhap)
+
     total_xuat = (
     query.filter(
         func.trim(PhieuNhap.loaihinh).like("XUAT"),  # Chỉ lấy loại hình XUAT
@@ -855,48 +862,50 @@ def get_loai_hinh_by_ma(ma: str, sql_server_db: Session = Depends(get_sql_db)):
         raise HTTPException(status_code=404, detail="Không tìm thấy loại hình")
     return loai_hinh
 
+from datetime import timedelta
+
+
 @app.get("/monitor-phieu-nhap")
 def monitor_phieu_nhap(sql_db: Session = Depends(get_sql_db), db: Session = Depends(get_db)):
-    # Lấy bản ghi từ bảng PhieuNhap
-    phieu_nhap = sql_db.query(PhieuNhap).order_by(PhieuNhap.id.desc()).first()
-    if not phieu_nhap:
-        return {"message": "PhieuNhap not found"}
+    # Lấy 10 bản ghi mới nhất từ bảng PhieuNhap
+    phieu_nhap_list = sql_db.query(PhieuNhap).order_by(PhieuNhap.id.desc()).limit(10).all()
+    if not phieu_nhap_list:
+        return {"message": "No PhieuNhap records found"}
     
-    print("phieu_nhap", phieu_nhap)
+    print("phieu_nhap_list", phieu_nhap_list)
 
-    # Thêm 7 giờ vào giớ phát hành và giờ vào
-    if phieu_nhap.giora:
-        phieu_nhap.giora = phieu_nhap.giora + timedelta(hours=7)
-        print("phieu_nhap.giora after adding 7 hours:", phieu_nhap.giora)
+    # Lấy các bản ghi Vehicle gần đây chưa được đánh dấu
+    recent_vehicles = db.query(Vehicle).filter(Vehicle.is_checked != True).order_by(Vehicle.createdAt.desc()).limit(10).all()
 
-    if phieu_nhap.giovao:
-        phieu_nhap.giovao = phieu_nhap.giovao + timedelta(hours=7)
-        print("phieu_nhap.giovao after adding 7 hours:", phieu_nhap.giovao)
+    # Duyệt qua từng bản ghi trong PhieuNhap và so sánh với Vehicle
+    for phieu_nhap in phieu_nhap_list:
+        # Thêm 7 giờ cho gio_ra và giovao (nếu có)
+        if phieu_nhap.giora:
+            phieu_nhap.giora = phieu_nhap.giora
+            print("phieu_nhap.giora adjusted:", phieu_nhap.giora)
+        
+        if phieu_nhap.giovao:
+            phieu_nhap.giovao = phieu_nhap.giovao
+            print("phieu_nhap.giovao adjusted:", phieu_nhap.giovao)
 
-    # Lấy 3 bản ghi gần nhất từ Vehicle mà is_checked != True
-    recent_vehicles = db.query(Vehicle).order_by(Vehicle.createdAt.desc()).limit(3).all()
+        # So sánh với Vehicle.createdAt trong vòng 1 phút
+        if phieu_nhap.giora:
+            for vehicle in recent_vehicles:
+                if abs((phieu_nhap.giora - vehicle.createdAt).total_seconds()) < 60:
+                    print(f"Vehicle matched with giorea: {vehicle.id}")
+                    vehicle.direction = "ra"
+                    vehicle.is_checked = True
+                    db.commit()
+                    return {"message": f"Vehicle ID {vehicle.id} updated to direction 'ra'"}
 
-    # Kiểm tra `giora` so với các bản ghi trong Vehicle (chỉ kiểm tra các Vehicle chưa được đánh dấu là True)
-    if phieu_nhap.giora:
-        print("phieu_nhap.giora=", phieu_nhap.giora)
-        for vehicle in recent_vehicles:
-            if abs((phieu_nhap.giora - vehicle.createdAt).total_seconds()) < 120 and vehicle.is_checked != True:
-                print("phieu_nhap.giora<120=", phieu_nhap.giora)
-                vehicle.direction = "ra"
-                vehicle.is_checked = True  # Đánh dấu là đã kiểm tra
-                db.commit()
-                return {"message": f"Updated Vehicle ID {vehicle.id} direction to 'ra', marked as checked"}
-
-    # Kiểm tra `giovao` so với các bản ghi trong Vehicle (chỉ kiểm tra các Vehicle chưa được đánh dấu là True)
-    if phieu_nhap.giovao:
-        print("phieu_nhap.giovao=", phieu_nhap.giovao)
-        for vehicle in recent_vehicles:
-            if abs((phieu_nhap.giovao - vehicle.createdAt).total_seconds()) < 120 and vehicle.is_checked != True:
-                print("phieu_nhap.giovao<120=", phieu_nhap.giovao)
-                vehicle.direction = "vao"
-                vehicle.is_checked = True  # Đánh dấu là đã kiểm tra
-                db.commit()
-                return {"message": f"Updated Vehicle ID {vehicle.id} direction to 'vao', marked as checked"}
+        if phieu_nhap.giovao:
+            for vehicle in recent_vehicles:
+                if abs((phieu_nhap.giovao - vehicle.createdAt).total_seconds()) < 60:
+                    print(f"Vehicle matched with giovao: {vehicle.id}")
+                    vehicle.direction = "vao"
+                    vehicle.is_checked = True
+                    db.commit()
+                    return {"message": f"Vehicle ID {vehicle.id} updated to direction 'vao'"}
 
     # Nếu không có bản ghi nào thỏa mãn
     return {"message": "No matching Vehicle records found"}
